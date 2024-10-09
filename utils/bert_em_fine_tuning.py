@@ -12,9 +12,56 @@ from utils.data_collector import DM_USE_CASES
 from pathlib import Path
 import argparse
 import distutils.util
+from transformers import default_data_collator
 
 PROJECT_DIR = Path(__file__).parent.parent
 RESULTS_DIR = os.path.join(PROJECT_DIR, 'results', 'models')
+
+
+def modified_data_collator(features):
+    # Debugging: Print the structure of the first feature
+    print("Feature structure:")
+    for key, value in features[0].items():
+        print(f"{key}: {type(value)}, {value}")
+
+    # First, let's handle any None values in the features
+    for feature in features:
+        for key in feature.keys():
+            if feature[key] is None:
+                if key == 'labels':
+                    feature[key] = -100  # Use -100 as the ignore index for labels
+                elif key in ['input_ids', 'token_type_ids', 'attention_mask']:
+                    feature[key] = [0]  # Use a single padding token
+                else:
+                    feature[key] = 0  # Default to 0 for other fields
+
+    # Now let's ensure all tensors have the same shape
+    max_length = max(len(feature['input_ids']) for feature in features)
+    
+    for feature in features:
+        for key in ['input_ids', 'token_type_ids', 'attention_mask']:
+            if isinstance(feature[key], list):
+                if len(feature[key]) < max_length:
+                    feature[key] = feature[key] + [0] * (max_length - len(feature[key]))
+            elif isinstance(feature[key], torch.Tensor):
+                if feature[key].size(0) < max_length:
+                    feature[key] = torch.cat([feature[key], torch.zeros(max_length - feature[key].size(0), dtype=feature[key].dtype)])
+
+    # Convert to tensors
+    batch = {}
+    for key in features[0].keys():
+        if key in ['input_ids', 'token_type_ids', 'attention_mask']:
+            batch[key] = torch.stack([torch.tensor(feature[key], dtype=torch.long) if isinstance(feature[key], list) else feature[key] for feature in features])
+        elif key == 'labels':
+            batch[key] = torch.tensor([feature[key] for feature in features], dtype=torch.long)
+        else:
+            # For any other fields, we'll try to convert to tensor, but skip if not possible
+            try:
+                batch[key] = torch.stack([torch.tensor(feature[key]) if not isinstance(feature[key], torch.Tensor) else feature[key] for feature in features])
+            except:
+                print(f"Warning: Skipping key {key} as it cannot be converted to tensor")
+
+    return batch
 
 
 def train(model_name: str, num_epochs: int, train_dataset: EMDataset, val_dataset: EMDataset, train_params: dict,
@@ -60,7 +107,8 @@ def train(model_name: str, num_epochs: int, train_dataset: EMDataset, val_datase
         train_dataset=train_dataset,  # training dataset
         eval_dataset=val_dataset,  # evaluation dataset
         model_init=model_init,
-        # compute_metrics=compute_metrics,
+        compute_metrics=compute_metrics,
+        data_collator=modified_data_collator,  # Use our custom data collator
     )
 
     trainer.train()

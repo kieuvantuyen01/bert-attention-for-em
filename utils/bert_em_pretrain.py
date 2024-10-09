@@ -117,16 +117,26 @@ def run_experiment(conf, featurizer_method, experiment, bert_model, train_params
     elif experiment == 'train':
 
         # load train features
-        X_train = pickle.load(open(train_save_path, "rb"))
+        if os.path.exists(train_save_path) and os.path.getsize(train_save_path) > 0:
+            X_train = pickle.load(open(train_save_path, "rb"))
         # train the model
         train_model(X_train, y_train, train_params, save_path=model_save_path)
 
     elif experiment == 'eval':
 
         # load test features
-        X_test = pickle.load(open(test_save_path, "rb"))
+        # if test_save_path exists and its size is greater than 0, load the test features
+        if os.path.exists(test_save_path) and os.path.getsize(test_save_path) > 0:
+            X_test = pickle.load(open(test_save_path, "rb"))
+        else:
+            print(f"Features for {use_case} not found. Run the 'compute_features' experiment first.")
+            return
         # load the trained model
-        classifier = pickle.load(open(model_save_path, "rb"))
+        if os.path.exists(model_save_path) and os.path.getsize(model_save_path) > 0:
+            classifier = pickle.load(open(model_save_path, "rb"))
+        else:
+            print(f"Model for {use_case} not found. Run the 'train' experiment first.")
+            return
         # evaluate the model on the test set
         f1 = eval_model(classifier, X_test, y_test)
         print(f"F1({use_case}, {conf['tok']}, {featurizer_method}) = {f1}")
